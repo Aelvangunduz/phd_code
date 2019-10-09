@@ -93,7 +93,7 @@ plt.title('Training and validation accuracy')
 plt.xlabel('Epochs')
 plt.ylabel('Accuracy')
 plt.legend(loc='lower right')
-plt.ylim((0.5,1))
+plt.ylim((0,1))
 plt.show()
 
 ## Output for Embedding Projector
