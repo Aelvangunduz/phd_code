@@ -6,110 +6,71 @@ import tensorflow_datasets as tfds
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
+from src.data import make_dataset
 
-tf.enable_eager_execution()
-tfds.disable_progress_bar()
+def to_one_hot(data_point_index, vocab_size):
+    temp = np.zeros(vocab_size)
+    temp[data_point_index] = 1
+    return temp
 
-### Embedding layers
-embedding_layer = layers.Embedding(1000, 5)
-result = embedding_layer(tf.constant([1,2,3]))
-result.numpy()
+# tf.enable_eager_execution()
+draft_sentences = make_dataset.main()
+draft_list = list(draft_sentences['draft'])
 
-result = embedding_layer(tf.constant([[0,1,2],[3,4,5]]))
-result.shape
+data = []
+time_weights = []
+WINDOW_SIZE = 2
+for draft_id, sentence in enumerate(draft_list):
+    for word_index, word in enumerate(sentence):
+        for nb_word in sentence[max(word_index - WINDOW_SIZE, 0) : min(word_index + WINDOW_SIZE, len(sentence)) + 1] : 
+            if nb_word != word:
+                data.append([word, nb_word])
+                time_weights.append([draft_sentences['normalized_time'][draft_id]])
 
-## Load data
-# (train_data, test_data), info = tfds.load(
-#     'imdb_reviews/subwords8k', 
-#     split = (tfds.Split.TRAIN, tfds.Split.TEST), 
-#     with_info=True, as_supervised=True)
-
-actions = pd.read_csv('data/raw/actions.csv')
-actions_long = np.array(actions.iloc[:,0:5])
-outcome = np.array(actions['outcome'])
-# sample_weights = np.array(actions['weight'])
-sample_weights = np.ones_like(outcome)
-X_train, X_test, y_train, y_test, sample_weights_train, sample_weights_test = \
-  train_test_split(actions_long, outcome, sample_weights, test_size=0.33, random_state=42)
-train_data = tf.data.Dataset.from_tensor_slices((X_train, y_train, sample_weights_train))
-test_data = tf.data.Dataset.from_tensor_slices((X_test, y_test, sample_weights_test))
-
-train_batches = train_data.shuffle(1000).batch(10)
-test_batches = test_data.shuffle(1000).batch(10)
-train_batch, train_label, sample_weights_train_temp = next(iter(train_batches))
-sample_weights_train_temp.numpy()
+words = set([j for i in data for j in i])
+word2int = {}
+int2word = {}
+vocab_size = len(words) # gives the total number of unique words
+for i,word in enumerate(words):
+    word2int[word] = i
+    int2word[i] = word
 
 
-## Sequential Model
-embedding_dim=16
-vocab_size = np.max(actions_long) + 1
+x_train = [] # input word
+y_train = [] # output word
 
-model = keras.Sequential([
-  layers.Embedding(vocab_size, embedding_dim),
-  layers.GlobalAveragePooling1D(),
-  layers.Dense(1, activation='sigmoid')
-])
-
-model.summary()
+for data_word in data:
+    x_train.append(to_one_hot(word2int[ data_word[0] ], vocab_size))
+    y_train.append(to_one_hot(word2int[ data_word[1] ], vocab_size))
+# convert them to numpy arrays
+x_train = np.asarray(x_train)
+y_train = np.asarray(y_train)
 
 
-## Fit the Model
-model.compile(optimizer='adam',
-              loss='binary_crossentropy',
-              metrics=['accuracy'])
+## Make computation graph
+x = tf.placeholder(tf.float32, shape=(None, vocab_size))
+y_label = tf.placeholder(tf.float32, shape=(None, vocab_size))
+sample_weights = tf.placeholder(tf.float32, shape=(None, 1))
 
-history = model.fit(
-    train_batches,
-    epochs=10,
-    validation_data=test_batches, validation_steps=20)
+EMBEDDING_DIM = 5 # you can choose your own number
+W1 = tf.Variable(tf.random_normal([vocab_size, EMBEDDING_DIM]))
+b1 = tf.Variable(tf.random_normal([EMBEDDING_DIM])) #bias
+hidden_representation = tf.add(tf.matmul(x,W1), b1)
 
+W2 = tf.Variable(tf.random_normal([EMBEDDING_DIM, vocab_size]))
+b2 = tf.Variable(tf.random_normal([vocab_size]))
+prediction = tf.nn.softmax(tf.add( tf.matmul(hidden_representation, W2), b2))
 
-## Visualize
-
-import matplotlib.pyplot as plt
-
-history_dict = history.history
-
-acc = history_dict['acc']
-val_acc = history_dict['val_acc']
-loss = history_dict['loss']
-val_loss = history_dict['val_loss']
-
-epochs = range(1, len(acc) + 1)
-
-plt.figure(figsize=(12,9))
-plt.plot(epochs, loss, 'bo', label='Training loss')
-plt.plot(epochs, val_loss, 'b', label='Validation loss')
-plt.title('Training and validation loss')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend()
-plt.show()
-
-plt.figure(figsize=(12,9))
-plt.plot(epochs, acc, 'bo', label='Training acc')
-plt.plot(epochs, val_acc, 'b', label='Validation acc')
-plt.title('Training and validation accuracy')
-plt.xlabel('Epochs')
-plt.ylabel('Accuracy')
-plt.legend(loc='lower right')
-plt.ylim((0,1))
-plt.show()
-
-## Output for Embedding Projector
-e = model.layers[0]
-weights = e.get_weights()[0]
-weights2 = weights[np.unique(actions_long)]
-print(weights.shape) # shape: (vocab_size, embedding_dim)
-
-import io
-
-out_v = io.open('vecs_noweight.tsv', 'w', encoding='utf-8')
-out_m = io.open('meta_noweight.tsv', 'w', encoding='utf-8')
-
-for num in np.arange(weights2.shape[0]):
-  vec = weights2[num]
-  out_m.write(str(np.unique(actions_long)[num]) + "\n")
-  out_v.write('\t'.join([str(x) for x in vec]) + "\n")
-out_v.close()
-out_m.close()
+sess = tf.Session()
+init = tf.global_variables_initializer()
+sess.run(init) #make sure you do this!
+# define the loss function:
+cross_entropy_loss = tf.reduce_mean(-tf.reduce_sum(y_label * tf.log(prediction) * sample_weights, \
+  reduction_indices=[1]))
+# define the training step:
+train_step = tf.train.GradientDescentOptimizer(0.1).minimize(cross_entropy_loss)
+n_iters = 10000
+# train for n_iter iterations
+for _ in range(n_iters):
+    sess.run(train_step, feed_dict={x: x_train, y_label: y_train, sample_weights: time_weights})
+    print('loss is : ', sess.run(cross_entropy_loss, feed_dict={x: x_train, y_label: y_train, sample_weights: time_weights}))

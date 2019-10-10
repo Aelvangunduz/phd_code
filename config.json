@@ -1,0 +1,13 @@
+{
+  "embeddings": [
+    {
+      "tensorName": "Hero Embedding",
+      "tensorShape": [
+        117,
+        16
+      ],
+      "tensorPath": "https://gist.githubusercontent.com/Aelvangunduz/1e51e04b188de30ad427e0299e295b6e/raw/54676b1d67b6fb31c51f2f8e03c07ce17581f28d/vect.tsv",
+      "metadataPath": "https://gist.githubusercontent.com/Aelvangunduz/1e51e04b188de30ad427e0299e295b6e/raw/54676b1d67b6fb31c51f2f8e03c07ce17581f28d/meta.tsv"
+    }
+  ]
+}
